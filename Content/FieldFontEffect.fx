@@ -3,7 +3,8 @@
 
 // Mix of the enhanced shader from https://discourse.libcinder.org/t/cinder-sdftext-initial-release-wip/171/13 and the original msdf shader
 
-matrix WorldViewProjection;
+matrix WorldMatrix;
+matrix ViewProjectionMatrix;
 float2 TextureSize;
 float4 ForegroundColor;
 float PxRange;
@@ -34,7 +35,7 @@ struct VertexShaderOutput
 VertexShaderOutput MainVS(in VertexShaderInput input)
 {
 	VertexShaderOutput output = (VertexShaderOutput)0;
-    output.Position = mul(input.Position, WorldViewProjection);
+    output.Position = mul(input.Position, mul(WorldMatrix, ViewProjectionMatrix));
 	
 	output.TexCoord = input.TexCoord / TextureSize;	
 	
@@ -56,14 +57,14 @@ float Median(float a, float b, float c)
 float4 MainPS(VertexShaderOutput input) : COLOR
 {	
 	// Convert normalized texture coordinates to absolute texture coordinates
-    float2 uv = input.TexCoord * TextureSize;
-	
+	float2 uv = input.TexCoord * TextureSize;
+
 	// Calculate derivatives
 	float2 Jdx = ddx(uv);
 	float2 Jdy = ddy(uv);
 
 	// Sample texture
-	float4 samp = tex2D(glyphSampler, input.TexCoord);
+	float3 samp = tex2D(glyphSampler, input.TexCoord).rgb;
 
 	// Calculate the signed distance (in texels)
 	float sigDist = Median(samp.r, samp.g, samp.b) - 0.5f;
@@ -72,20 +73,19 @@ float4 MainPS(VertexShaderOutput input) : COLOR
 	// We do this using the derivatives.	
 	float2 gradDist = SafeNormalize(float2(ddx(sigDist), ddy(sigDist)));
 	float2 grad = float2(gradDist.x * Jdx.x + gradDist.y * Jdy.x, gradDist.x * Jdx.y + gradDist.y * Jdy.y);
-	
+
 	// Apply anti-aliasing
 	const float thickness = 0.125f;
 	const float normalization = thickness * 0.5f * sqrt(2.0f);
 
 	float afWidth = min(normalization * length(grad), 0.5f);
 	float opacity = smoothstep(0.0f - afWidth, 0.0f + afWidth, sigDist);
-    //opacity *= pow(samp.a, 0.5f);
 
 	// Apply pre-multiplied alpha with gamma correction
 
 	float4 color;
 	color.a = pow(abs(ForegroundColor.a * opacity), 1.0f / 2.2f);
-	color.rgb = ForegroundColor.rgb;
+	color.rgb = ForegroundColor.rgb * color.a;
 
 	return color;
 }
@@ -108,7 +108,7 @@ technique SmallText
 	pass P0
 	{
 		VertexShader = compile VS_SHADERMODEL MainVS();
-		PixelShader = compile PS_SHADERMODEL AltPS();		
+		PixelShader = compile PS_SHADERMODEL MainPS();		
 	}
 };
 

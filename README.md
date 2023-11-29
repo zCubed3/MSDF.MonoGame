@@ -1,5 +1,7 @@
 # MSDF.MonoGame: MonoGame MSDF Renderer
 
-### TODO: Documentation
+A MonoGame MSDF Renderer built with compatibility and ease of use in mind
 
-### Based on [roy-t/MSDF](https://github.com/roy-t/MSDF)
+### TODO: Pictures and Videos
+
+### Used [roy-t/MSDF](https://github.com/roy-t/MSDF) as a reference (implementations are similar but quite different at the same time)
