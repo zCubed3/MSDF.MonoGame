@@ -11,13 +11,13 @@ namespace MSDF.MonoGame
 {
     public class DrawingLayer
     {
-        public SpriteSortMode sortMode = SpriteSortMode.BackToFront;
-        public BlendState blendState = BlendState.AlphaBlend;
-        public SamplerState samplerState = SamplerState.LinearWrap;
-        public Matrix? matrix = null;
-        public Effect effect = null;
+        public SpriteSortMode SortMode = SpriteSortMode.BackToFront;
+        public BlendState BlendState = BlendState.AlphaBlend;
+        public SamplerState SamplerState = SamplerState.LinearWrap;
+        public Matrix? Matrix = null;
+        public Effect Effect = null;
 
-        public SpriteBatch batch;
+        public SpriteBatch Batch;
 
         public static DrawingLayer ActiveLayer;
 
@@ -25,24 +25,24 @@ namespace MSDF.MonoGame
 
         public DrawingLayer(SpriteSortMode sortMode, BlendState blendState, SamplerState samplerState, Matrix? matrix, Effect effect)
         {
-            this.sortMode = sortMode;
-            this.blendState = blendState;
-            this.samplerState = samplerState;
-            this.matrix = matrix;
-            this.effect = effect;
+            this.SortMode = sortMode;
+            this.BlendState = blendState;
+            this.SamplerState = samplerState;
+            this.Matrix = matrix;
+            this.Effect = effect;
         }
 
         public void Begin(SpriteBatch batch)
         {
-            this.batch = batch;
+            this.Batch = batch;
             ActiveLayer = this;
 
-            batch.Begin(sortMode, blendState, samplerState, DepthStencilState.Default, null, effect, matrix);
+            batch.Begin(SortMode, BlendState, SamplerState, DepthStencilState.Default, null, Effect, Matrix);
         }
 
         public void End(SpriteBatch batch)
         {
-            this.batch = null;
+            this.Batch = null;
             ActiveLayer = null;
 
             batch.End();
@@ -61,8 +61,8 @@ namespace MSDF.MonoGame
 
         public ScopedLayer(SpriteBatch batch, DrawingLayer layer, Matrix? matrix = null, Effect effect = null)
         {
-            layer.matrix = matrix;
-            layer.effect = effect;
+            layer.Matrix = matrix;
+            layer.Effect = effect;
             layer.Begin(batch);
 
             this.layer = layer;

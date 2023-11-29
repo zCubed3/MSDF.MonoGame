@@ -1,15 +1,12 @@
-﻿#define VS_SHADERMODEL vs_3_0
-#define PS_SHADERMODEL ps_3_0
+﻿#define VS_SHADERMODEL vs_4_0
+#define PS_SHADERMODEL ps_4_0
 
 // Mix of the enhanced shader from https://discourse.libcinder.org/t/cinder-sdftext-initial-release-wip/171/13 and the original msdf shader
-// zCubed: I've added some further additions to work with an atlas instead of singular characters
 
 matrix WorldViewProjection;
 float2 TextureSize;
 float4 ForegroundColor;
 float PxRange;
-float2 Offset;
-float4 GlyphBB; // XY = BB min, ZW = BB max
 
 texture GlyphTexture;
 sampler glyphSampler = sampler_state
@@ -37,10 +34,9 @@ struct VertexShaderOutput
 VertexShaderOutput MainVS(in VertexShaderInput input)
 {
 	VertexShaderOutput output = (VertexShaderOutput)0;
-    output.Position = mul(input.Position + float4(Offset, 0, 0), WorldViewProjection);
+    output.Position = mul(input.Position, WorldViewProjection);
 	
-	float2 uv = input.TexCoord;	
-    output.TexCoord = lerp(GlyphBB.xy, GlyphBB.zw, uv) / TextureSize;
+	output.TexCoord = input.TexCoord / TextureSize;	
 	
 	return output;
 }
@@ -89,7 +85,7 @@ float4 MainPS(VertexShaderOutput input) : COLOR
 
 	float4 color;
 	color.a = pow(abs(ForegroundColor.a * opacity), 1.0f / 2.2f);
-	color.rgb = ForegroundColor.rgb * color.a;
+	color.rgb = ForegroundColor.rgb;
 
 	return color;
 }
@@ -103,7 +99,7 @@ float4 AltPS(VertexShaderOutput input) : COLOR
 	sigDist = sigDist * dot(msdfUnit, 0.5f / fwidth(input.TexCoord));
 
 	float opacity = clamp(sigDist + 0.5f, 0.0f, 1.0f);
-	
+
 	return ForegroundColor * opacity;
 }
 
@@ -112,7 +108,7 @@ technique SmallText
 	pass P0
 	{
 		VertexShader = compile VS_SHADERMODEL MainVS();
-		PixelShader = compile PS_SHADERMODEL MainPS();		
+		PixelShader = compile PS_SHADERMODEL AltPS();		
 	}
 };
 

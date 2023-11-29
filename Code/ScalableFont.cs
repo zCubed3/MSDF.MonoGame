@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -9,14 +10,93 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
 using Newtonsoft.Json;
+using Color = Microsoft.Xna.Framework.Color;
+using Rectangle = Microsoft.Xna.Framework.Rectangle;
 
 namespace MSDF.MonoGame
 {
     /// <summary>
-    /// Alternative to MonoGame's built in "SpriteFont"
+    /// MSDF based alternative to MonoGame's built in "SpriteFont"
     /// </summary>
     public class ScalableFont
     {
+        // TODO: Cache this?
+        public class StringMesh
+        {
+            private VertexPositionTexture[] _vertices;
+            private readonly short[] _indices;
+            private int _length = 0; 
+
+            public StringMesh(string str, ScalableFont font, Vector2 origin, MSDFDrawSettings drawSettings, float whiteSpaceWidth)
+            {
+                _length = str.Length - str.Count(c => char.IsWhiteSpace(c));
+                
+                _vertices = new VertexPositionTexture[_length * 4];
+                _indices = new short[_length * 6];
+
+                Vector2 shift = origin;
+                uint vertIndex = 0;
+                uint triIndex = 0;
+                
+                foreach (char c in str)
+                {
+                    if (char.IsWhiteSpace(c))
+                    {
+                        shift.X += whiteSpaceWidth * drawSettings.pixelSize;
+                        continue;
+                    }
+                    
+                    if (!font.GlyphTable.TryGetValue(c, out MSDFGlyph glyph))
+                        continue;
+                    
+                    if (glyph == null)
+                        continue;
+
+                    // TODO: Better drawing parameters?
+                    var bounds = glyph.atlasBounds;
+                    
+                    var plane = glyph.planeBounds;
+
+                    Vector2 v1 = shift + (new Vector2(plane.left, plane.top) * drawSettings.pixelSize);
+                    Vector2 v2 = shift + (new Vector2(plane.right, plane.bottom) * drawSettings.pixelSize);
+                    
+                    _vertices[vertIndex].Position = new Vector3(v1.X, v1.Y, 0.0F);
+                    _vertices[vertIndex + 1].Position = new Vector3(v2.X, v1.Y, 0.0F);
+                    _vertices[vertIndex + 2].Position = new Vector3(v1.X, v2.Y, 0.0F);
+                    _vertices[vertIndex + 3].Position = new Vector3(v2.X, v2.Y, 0.0F);
+                    
+                    _vertices[vertIndex].TextureCoordinate = new Vector2(bounds.left, bounds.top);
+                    _vertices[vertIndex + 1].TextureCoordinate = new Vector2(bounds.right, bounds.top);
+                    _vertices[vertIndex + 2].TextureCoordinate = new Vector2(bounds.left, bounds.bottom);
+                    _vertices[vertIndex + 3].TextureCoordinate = new Vector2(bounds.right, bounds.bottom);
+
+                    _indices[triIndex] = (short)vertIndex;
+                    _indices[triIndex + 1] = (short)(vertIndex + 1);
+                    _indices[triIndex + 2] = (short)(vertIndex + 2);
+                    _indices[triIndex + 3] = (short)(vertIndex + 3);
+                    _indices[triIndex + 4] = (short)(vertIndex + 2);
+                    _indices[triIndex + 5] = (short)(vertIndex + 1);
+                    
+                    vertIndex += 4;
+                    triIndex += 6;
+                    
+                    shift.X += glyph.advance * drawSettings.pixelSize * (drawSettings.rtl ? -1F : 1F);
+                }
+            }
+            
+            public void Draw(GraphicsDevice graphicsDevice)
+            {
+                graphicsDevice.DrawUserIndexedPrimitives(
+                    PrimitiveType.TriangleList,
+                    _vertices,
+                    0,
+                    _vertices.Length,
+                    _indices,
+                    0,
+                    _indices.Length / 3);
+            }
+        }
+        
         public class GlyphQuad
         {
             public readonly VertexPositionTexture[] vertices;
@@ -75,7 +155,7 @@ namespace MSDF.MonoGame
         public static DrawingLayer FontDrawingLayer = new DrawingLayer();
         public static GlyphQuad Quad = new GlyphQuad();
         public static RasterizerState RasterizerState = new RasterizerState() { CullMode = CullMode.None };
-
+        
         public class MSDFAtlas
         {
             public string type;
@@ -111,13 +191,18 @@ namespace MSDF.MonoGame
             public MSDFGlyphBounds planeBounds;
             public MSDFGlyphBounds atlasBounds;
 
-            public float width;
-            public float height;
+            public float Width = 0;
+            public float Height = 0;
+
+            public float Bottom = 0;
+            public float Top = 0;
 
             public void CalculateLayout(MSDFAtlas atlas)
             {
-                width = (atlasBounds.right - atlasBounds.left) / atlas.size;
-                height = (atlasBounds.bottom - atlasBounds.top) / atlas.size;
+                Width = (atlasBounds.right - atlasBounds.left) / atlas.size;
+                Height = (atlasBounds.bottom - atlasBounds.top) / atlas.size;
+                Bottom = planeBounds.bottom;
+                Top = planeBounds.top;
             }
         }
 
@@ -125,9 +210,14 @@ namespace MSDF.MonoGame
         public MSDFAtlas atlas;
         public MSDFMetrics metrics;
         public MSDFGlyph[] glyphs;
-        public float whiteSpaceWidth = 0.3F; // Multiplier over size of 1 character
 
+        public float whiteSpaceMultiplier = 1.0F;
+        public float WhiteSpaceWidth => _whiteSpaceBaseSize * whiteSpaceMultiplier;
 
+        private float _whiteSpaceBaseSize = 0.25F;
+
+        public float LineHeight { get; private set; } = 1.0F;
+        
         public Dictionary<char, MSDFGlyph> GlyphTable { get; private set; } = new Dictionary<char, MSDFGlyph>();
         public string FontName { get; private set; }
 
@@ -171,11 +261,13 @@ namespace MSDF.MonoGame
 
             foreach (var glyph in glyphs)
             {
-                if (glyph.atlasBounds == null || glyph.planeBounds == null)
-                    continue;
-
-                glyph.CalculateLayout(atlas);
+                if (glyph.atlasBounds != null && glyph.planeBounds != null) 
+                    glyph.CalculateLayout(atlas);
+                
                 GlyphTable.Add(glyph.unicode, glyph);
+
+                if (glyph.unicode == ' ')
+                    _whiteSpaceBaseSize = glyph.advance;
             }
 
             glyphs = null;
@@ -197,58 +289,57 @@ namespace MSDF.MonoGame
 
         public delegate void MSDFFontDrawCall(SpriteBatch batch, Matrix? matrix);
         protected Queue<MSDFFontDrawCall> drawCalls = new Queue<MSDFFontDrawCall>();
-
-        // Measures the imaginary box around this string
-        public Vector2 MeasureString(string text, float pixelSize)
+        
+        /// <summary>
+        /// Attempts to guess a best fit for a bounding box around the text
+        /// </summary>
+        /// <param name="text"></param>
+        /// <param name="pixelSize"></param>
+        /// <returns></returns>
+        public RectangleF MeasureString(string text)
         {
             if (string.IsNullOrEmpty(text))
-                return Vector2.Zero;
+                return RectangleF.Empty;
 
-            float pixOffset = pixelSize / atlas.size;
-
-            float lineHeight = metrics.lineHeight * pixOffset / 2;
-
-            float actualHeight = atlas.size * lineHeight;
-
-            Vector2 scale = Vector2.Zero;
-            scale.Y += actualHeight;
-
-            float lineLength = 0;
-
-            int l = 0;
+            RectangleF rect = RectangleF.Empty;
+            RectangleF testRect = RectangleF.Empty;
+            
+            float carriage = 0.0F;
+            float line = 0.0F;
+            
             foreach (char c in text)
             {
                 if (c == '\n')
                 {
-                    scale.Y += actualHeight;
-                    lineLength = 0;
-                    l++;
+                    //scale.Y += LineHeight * pixelSize;
+                    
+                    carriage = 0.0F;
+                    line += LineHeight;
+                    
                     continue;
                 }
-
-                if (c == ' ')
-                {
-                    scale.X += whiteSpaceWidth;
-                    l++;
-                    continue;
-                }
-
+                
                 if (GlyphTable.TryGetValue(c, out MSDFGlyph glyph))
                 {
-                    float size = glyph.advance;
+                    float size = MathF.Max(glyph.advance, glyph.Width);
 
-                    // HACK: Apparently this fixes alignment in some cases?
-                    if (l == text.Length - 1)
-                        size += whiteSpaceWidth;
+                    // TODO: Precalculate this
+                    if (glyph.planeBounds != null)
+                    {
+                        testRect = RectangleF.FromLTRB(glyph.planeBounds.left, glyph.planeBounds.top,
+                            glyph.planeBounds.right, glyph.planeBounds.bottom);
 
-                    lineLength += size * pixelSize;
-                    scale.X = MathF.Max(lineLength, scale.X);
+                        testRect.X += carriage;
+                        testRect.Y += line;
+                        
+                        rect = RectangleF.Union(testRect, rect);
+                    }
+
+                    carriage += glyph.advance;
                 }
-
-                l++;
             }
 
-            return scale;
+            return rect;
         }
 
         public enum HAlignment
@@ -335,98 +426,81 @@ namespace MSDF.MonoGame
                 MSDFDrawSettings drawSettings = settings;
                 ScalableFont fontCapture = this;
 
-                string technique = drawSettings.pixelSize > 12 ? "LargeText" : "SmallText";
+                //string technique = drawSettings.pixelSize > 12 ? "LargeText" : "SmallText";
 
                 // TODO: Does this severely effect performance?
                 MSDFShader.Parameters["WorldViewProjection"].SetValue(drawSettings.matrix * (matrix ?? Matrix.Identity));
                 MSDFShader.Parameters["ForegroundColor"].SetValue(drawSettings.color.ToVector4());
-                MSDFShader.CurrentTechnique = MSDFShader.Techniques[technique];
-
-                Vector2 wholeScale = MeasureString(capture, drawSettings.pixelSize);
-                Vector2 offset = wholeScale * new Vector2(0, -drawSettings.verticalAlign);
-
+                //MSDFShader.CurrentTechnique = MSDFShader.Techniques[technique];
+                MSDFShader.CurrentTechnique.Passes[0].Apply();
+                
+                RectangleF bounds = MeasureString(capture);
+                
+                Vector2 offset = new Vector2(bounds.X, bounds.Y);
+                offset += new Vector2(bounds.Width * drawSettings.horizontalAlign, bounds.Height * drawSettings.verticalAlign);
+                offset *= drawSettings.pixelSize;
+                
                 foreach (string token in capture.Split('\n'))
                 {
                     string line = token.TrimEnd(' ', '\n', '\r');
 
                     Vector2 position = Vector2.Zero;
-                    Vector2 localScale = MeasureString(line, drawSettings.pixelSize);
+                    RectangleF localScale = MeasureString(line);
 
-                    float halign = drawSettings.horizontalAlign;
-
-                    position -= localScale * new Vector2(halign, 0);
+                    //position -= localScale * new Vector2(0, 0);
                     position -= offset;
 
-                    foreach (char c in line)
-                    {
-                        if (char.IsWhiteSpace(c))
-                        {
-                            position.X += whiteSpaceWidth * drawSettings.pixelSize;
-                            continue;
-                        }
-
-                        if (fontCapture.GlyphTable.TryGetValue(c, out MSDFGlyph glyph))
-                        {
-                            if (glyph == null)
-                                continue;
-
-                            Vector4 glyphPack = new Vector4(
-                                glyph.atlasBounds.left,
-                                glyph.atlasBounds.bottom,
-                                glyph.atlasBounds.right,
-                                glyph.atlasBounds.top
-                            );
-
-                            MSDFShader.Parameters["Offset"].SetValue(position);
-                            MSDFShader.Parameters["GlyphBB"].SetValue(glyphPack);
-                            MSDFShader.CurrentTechnique.Passes[0].Apply();
-
-                            // TODO: Better drawing parameters?
-                            var plane = glyph.planeBounds;
-                            Quad.Render(
-                                ActiveGame.GraphicsDevice,
-                                new Vector2(plane.left, plane.top) * drawSettings.pixelSize,
-                                new Vector2(plane.right, plane.bottom) * drawSettings.pixelSize
-                            );
-
-                            position.X += glyph.advance * drawSettings.pixelSize * (drawSettings.rtl ? -1F : 1F);
-                        }
-                    }
-
-                    offset.Y -= drawSettings.pixelSize;
+                    StringMesh mesh = new StringMesh(line, fontCapture, position, drawSettings, WhiteSpaceWidth);
+                    mesh.Draw(ActiveGame.GraphicsDevice);
+                    
+                    offset.Y -= LineHeight * drawSettings.pixelSize;
                 }
             });
         }
 
         public static void RenderAll(SpriteBatch batch, Matrix? matrix = null)
         {
+            Matrix drawMatrix = matrix ?? Matrix.Identity;
+            drawMatrix *= Matrix.CreateScale(1.0F, -1.0F, 1.0F);
+            
             if (MSDFShader == null)
                 MSDFShader = ActiveGame.Content.Load<Effect>("FieldFontEffect");
 
             foreach (var font in LoadedFonts.Values)
-                font.Render(batch, matrix);
+                font.Render(batch, drawMatrix);
         }
 
         public void Render(SpriteBatch batch, Matrix? matrix = null)
         {
-            MSDFShader.Parameters["TextureSize"].SetValue(atlasTexture.GetSize());
-            MSDFShader.Parameters["PxRange"].SetValue(atlas.distanceRange);
-            MSDFShader.Parameters["GlyphTexture"].SetValue(atlasTexture);
+            MSDFShader.Parameters["TextureSize"]?.SetValue(atlasTexture.GetSize());
+            MSDFShader.Parameters["PxRange"]?.SetValue(atlas.distanceRange);
+            MSDFShader.Parameters["GlyphTexture"]?.SetValue(atlasTexture);
             MSDFShader.CurrentTechnique.Passes[0].Apply();
 
             var previousState = ActiveGame.GraphicsDevice.RasterizerState;
             ActiveGame.GraphicsDevice.RasterizerState = RasterizerState;
 
-            using (FontDrawingLayer.BeginScoped(batch, matrix))
+            FontDrawingLayer.Matrix = matrix;
+            
+            FontDrawingLayer.Begin(batch);
+            
+            while (drawCalls.Count > 0)
             {
-                while (drawCalls.Count > 0)
-                {
-                    var call = drawCalls.Dequeue();
-                    call?.Invoke(batch, matrix);
-                }
+                var call = drawCalls.Dequeue();
+                call?.Invoke(batch, matrix);
             }
+            
+            FontDrawingLayer.End(batch);
 
             ActiveGame.GraphicsDevice.RasterizerState = previousState;
+        }
+
+        /// <summary>
+        /// Flushes the draw queue, ensuring that vsync doesn't cause duplicates
+        /// </summary>
+        public void Flush()
+        {
+            drawCalls.Clear();
         }
     }
 }
