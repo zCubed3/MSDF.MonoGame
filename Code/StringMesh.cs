@@ -21,6 +21,7 @@
  */
 
 using System;
+using System.Drawing;
 using System.Linq;
 
 using Microsoft.Xna.Framework;
@@ -31,16 +32,59 @@ namespace MSDF.MonoGame
     public class StringMesh
     {
         private VertexPositionTexture[] _vertices;
-        private readonly short[] _indices;
+        private short[] _indices;
 
-        public StringMesh(TextDrawRecipe recipe, ScalableFont font, Vector2 origin)
+        private int _lastHash = 0;
+        private int _lastSize = 0;
+
+        public StringMesh()
+        {
+            
+        }
+        
+        public StringMesh(TextDrawRecipe recipe, ScalableFont font)
+        {
+            Rebuild(recipe, font);
+        }
+
+        public void Rebuild(TextDrawRecipe recipe, ScalableFont font)
+        {
+            int hash = recipe.GetHashCode();
+            int size = recipe.Text.Length;
+
+            bool mustBuild = _lastHash != hash;
+
+            if (_lastSize != size)
+            {
+                Allocate(recipe);
+                mustBuild = true;
+            }
+
+            if (mustBuild)
+                Build(recipe, font);
+            
+            _lastSize = size;
+            _lastHash = hash;
+        }
+
+        private void Allocate(TextDrawRecipe recipe)
         {
             int length = recipe.Text.Length - recipe.Text.Count(c => char.IsWhiteSpace(c));
 
             _vertices = new VertexPositionTexture[length * 4];
             _indices = new short[length * 6];
+        }
 
-            Vector2 shift = origin;
+        private void Build(TextDrawRecipe recipe, ScalableFont font)
+        {
+            RectangleF stringBounds = font.MeasureString(recipe.Text);
+
+            Vector2 offset = new Vector2(stringBounds.X, -stringBounds.Y);
+            offset += new Vector2(stringBounds.Width * -recipe.HorizontalAlign,
+                stringBounds.Height * -recipe.VerticalAlign);
+            offset *= recipe.PixelSize;
+
+            Vector2 shift = offset;
             uint vertIndex = 0;
             uint triIndex = 0;
 
@@ -48,8 +92,8 @@ namespace MSDF.MonoGame
             {
                 if (c == '\n')
                 {
-                    shift.Y += recipe.LineSpaceScale * font.Metrics.lineHeight * recipe.PixelSize;
-                    shift.X = origin.X;
+                    shift.Y += recipe.LineSpacing * font.Metrics.lineHeight * recipe.PixelSize;
+                    shift.X = offset.X;
                     continue;
                 }
 

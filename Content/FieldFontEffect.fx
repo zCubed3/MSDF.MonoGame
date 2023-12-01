@@ -36,6 +36,7 @@ VertexShaderOutput MainVS(in VertexShaderInput input)
 {
 	VertexShaderOutput output = (VertexShaderOutput)0;
     output.Position = mul(input.Position, mul(WorldMatrix, ViewProjectionMatrix));
+    output.Position.z = 0.0;
 	
 	output.TexCoord = input.TexCoord / TextureSize;	
 	

@@ -46,7 +46,7 @@ namespace MSDF.MonoGame
         public float HorizontalAlign = 0F;
         public float VerticalAlign = 0F;
         public float CharacterSpacing = 1.0F;
-        public float LineSpaceScale = 1.0F;
+        public float LineSpacing = 1.0F;
         
         public bool RightToLeft = false;
 
@@ -170,8 +170,10 @@ namespace MSDF.MonoGame
         
         
         private MSDFGlyph[] _uncachedGlyphs = null;
+        
         private List<TextDrawRecipe> _drawRecipes = new();
-
+        private List<DrawString> _drawStrings = new();
+        
         public Dictionary<char, CachedGlyph> GlyphTable { get; private set; }
         public string FontName { get; private set; }
 
@@ -309,6 +311,11 @@ namespace MSDF.MonoGame
             }
         }
 
+        public void Draw(DrawString drawString)
+        {
+            _drawStrings.Add(drawString);
+        }
+        
         public void Draw(TextDrawRecipe recipe)
         {
             _drawRecipes.Add(recipe);
@@ -350,7 +357,7 @@ namespace MSDF.MonoGame
 
         public void Draw(string text, Vector2 position, float halign = 0F, float valign = 0F, float pixelSize = 64, Color color = default, bool rtl = false)
             => Draw(text, position, 0F, 0F, Vector2.One, halign, valign, pixelSize, color, rtl);
-
+        
         private void DrawRecipe(ref GraphicsDevice graphicsDevice, TextDrawRecipe recipe)
         {
             if (string.IsNullOrEmpty(recipe.Text))
@@ -363,14 +370,8 @@ namespace MSDF.MonoGame
             MSDFShader.Parameters["ForegroundColor"].SetValue(recipe.Color);
             MSDFShader.CurrentTechnique = MSDFShader.Techniques[technique];
             MSDFShader.CurrentTechnique.Passes[0].Apply();
-                
-            RectangleF bounds = MeasureString(recipe.Text);
-                
-            Vector2 offset = new Vector2(bounds.X, -bounds.Y);
-            offset += new Vector2(bounds.Width * -recipe.HorizontalAlign, bounds.Height * -recipe.VerticalAlign);
-            offset *= recipe.PixelSize;
             
-            StringMesh mesh = new StringMesh(recipe, this, offset);
+            StringMesh mesh = new StringMesh(recipe, this);
             mesh.Draw(ref graphicsDevice);
         }
 
@@ -405,7 +406,10 @@ namespace MSDF.MonoGame
             
             foreach (TextDrawRecipe recipe in _drawRecipes)
                 DrawRecipe(ref graphicsDevice, recipe);
-            
+
+            foreach (DrawString draw in _drawStrings)
+                draw.Draw(ref graphicsDevice);
+
             FontDrawingLayer.End(batch);
 
             Flush();
@@ -418,6 +422,7 @@ namespace MSDF.MonoGame
         /// </summary>
         public void Flush()
         {
+            _drawStrings.Clear();
             _drawRecipes.Clear();
         }
     }
